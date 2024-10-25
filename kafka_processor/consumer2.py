@@ -8,7 +8,7 @@ consumer_config = {
 }
 
 consumer = Consumer(consumer_config)
-consumer.subscribe(['processed-user-login'])
+consumer.subscribe(['summary-error'])
 
 try:
     while True:

@@ -17,3 +17,12 @@ def log_error_to_kafka(producer, topic, user_id, error_type, msg_dict):
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
     publish_message(producer, topic, json.dumps(error_record))
+
+def log_cleaned_data(producer, topic, user_id, msg_dict, cleantype):
+    record = {
+        'user_id' : user_id,
+        'message_content' : msg_dict,
+        'cleantype' : cleantype,
+        'timestamp' : datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    publish_message(producer, topic, json.dumps(record))
