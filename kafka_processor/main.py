@@ -40,13 +40,13 @@ def main():
             try:
                 msg_dict = json.loads(msg.value().decode('utf-8'))
             except json.JSONDecodeError as e:
-                log_error_to_kafka(producer, 'transformation-errors', "Unknown", f"JSON decoding error: {str(e)}", {})
+                log_error_to_kafka(producer, 'processed-errors', "Unknown", f"JSON decoding error: {str(e)}", {})
                 continue
 
             # Check for user_id specifically
             user_id = msg_dict.get('user_id')
             if user_id is None:
-                log_error_to_kafka(producer, 'transformation-errors', "Unknown", "Missing user_id", msg_dict)
+                log_error_to_kafka(producer, 'processed-errors', "Unknown", "Missing user_id", msg_dict)
                 continue
 
             # Check for other required fields
@@ -59,7 +59,7 @@ def main():
                     all_fields_present = False
 
             if not all_fields_present:
-                log_error_to_kafka(producer, 'transformation-errors', user_id, f"Missing fields: {missing_fields}", msg_dict)
+                log_error_to_kafka(producer, 'processed-errors', user_id, f"Missing fields: {missing_fields}", msg_dict)
                 continue
 
             # Example condition to filter messages
@@ -67,21 +67,21 @@ def main():
                 log_cleaned_data(producer, 'cleaned-data', user_id, msg_dict, 'filterd messages app_version != 2.3.0')
                 continue
 
-            transformed_msg = transform_message(msg_dict, producer, 'transformation-errors')
+            transformed_msg = transform_message(msg_dict, producer, 'processed-errors')
             if transformed_msg is None:
                 continue
 
             printer.update_counts(msg_dict['device_type'], msg_dict['locale'])
             try:
-                publish_message(producer, 'transformation-output', json.dumps(transformed_msg))
+                publish_message(producer, 'processed-output', json.dumps(transformed_msg))
                 consumer.commit(asynchronous=False)  # Commit after successful publishing
             except Exception as e:
-                log_error_to_kafka(producer, 'transformation-errors', user_id, f"Publishing error: {str(e)}", transformed_msg)
+                log_error_to_kafka(producer, 'processed-errors', user_id, f"Publishing error: {str(e)}", transformed_msg)
                 continue  # Skip to the next message in case of failure
 
 
             printer.processed_count += 1
-            print(printer.processed_count)
+            #print(printer.processed_count)
 
             if printer.processed_count % 1000 == 0:
                 statistics = printer.get_summary_statistics()

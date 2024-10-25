@@ -1,3 +1,5 @@
+### Read Topic : processed-errors
+
 from confluent_kafka import Consumer
 
 # Configure the consumer
@@ -8,7 +10,7 @@ consumer_config = {
 }
 
 consumer = Consumer(consumer_config)
-consumer.subscribe(['summary-error'])
+consumer.subscribe(['processed-errors'])
 
 try:
     while True:
