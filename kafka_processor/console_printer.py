@@ -6,7 +6,7 @@ class ConsolePrinter:
         self.processed_count = 0  # Counter for processed records
         self.device_type_counts = defaultdict(int)
         self.locale_counts = defaultdict(int)
-        self.missing_field_counts = {'device_type': 0}  # Counts for missing fields
+        self.missing_field_counts = defaultdict(int)  # Counts for missing fields
 
     def summarize_missing_fields(self):
         """
@@ -58,5 +58,4 @@ class ConsolePrinter:
         
         :param field: The field that is missing.
         """
-        if field in self.missing_field_counts:
-            self.missing_field_counts[field] += 1
+        self.missing_field_counts[field] += 1

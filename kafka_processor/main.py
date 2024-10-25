@@ -26,6 +26,9 @@ def main():
 
     printer = ConsolePrinter()
 
+    # Indicate that the consumer has started
+    print("Kafka Consumer has started...")
+
     try:
        while True:
            msg = poll_message(consumer)
@@ -59,9 +62,10 @@ def main():
 
            # Increment processed record count
            printer.processed_count += 1
+           #print(printer.processed_count)
 
            # Print summary every 10000 processed messages without warnings
-           if printer.processed_count % 10000 == 0:
+           if printer.processed_count % 1000 == 0:
                printer.print_summary()
 
     except KeyboardInterrupt:
