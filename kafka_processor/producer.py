@@ -1,13 +1,19 @@
 from confluent_kafka import Producer
-from error_producer import log_error_to_kafka
+import json
+from datetime import datetime
 
 def create_producer(config):
-    try:
-        return Producer(config)
-    except Exception as e:
-        log_error_to_kafka(None, 'error-log-topic', "Unknown", f'Producer creation error: {str(e)}')
-        raise
+    return Producer(config)
 
-def produce_message(producer, topic, message):
+def publish_message(producer, topic, message):
     producer.produce(topic, value=message)
     producer.flush()
+
+def log_error_to_kafka(producer, topic, user_id, error_type, msg_dict):
+    error_record = {
+        'user_id': user_id,
+        'error_type': error_type,
+        'message_content': msg_dict,
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    }
+    publish_message(producer, topic, json.dumps(error_record))
