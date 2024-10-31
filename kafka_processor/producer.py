@@ -47,7 +47,7 @@ def log_error_to_kafka(producer, topic, user_id, error_type, msg_dict):
         "message_content": msg_dict,
         "timestamp": datetime.now().strftime(
             "%Y-%m-%d %H:%M:%S"
-        ),  # Capture the current timestamp
+        ),  # Capture the current timestamp : If there is a JSON Decoding error, we won't be able to get the timestamp, that is the reason we are adding a timestamp here!
     }
     # Publish the error record to Kafka
     publish_message(producer, topic, json.dumps(error_record))
