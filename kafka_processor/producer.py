@@ -1,77 +1,78 @@
-from confluent_kafka import Producer
+"""
+This module provides functions to interact with Kafka producers.
+"""
+
 import json
-from datetime import datetime
+import time
+from confluent_kafka import Producer
 
-
-def create_producer(config):
+def create_producer(config: dict) -> Producer:
     """
-    Creates a Kafka producer instance using the provided configuration.
+    Create a Kafka producer instance.
 
     Args:
-        config (dict): Configuration settings for the Kafka producer.
+        config (dict): Configuration dictionary for the producer.
 
     Returns:
         Producer: A Kafka Producer instance.
     """
     return Producer(config)
 
-
-def publish_message(producer, topic, message):
+def publish_message(producer: Producer, topic: str, message: dict) -> None:
     """
-    Publishes a message to a specified Kafka topic.
+    Publish a message to a Kafka topic.
 
     Args:
         producer (Producer): The Kafka producer instance.
-        topic (str): The topic to which the message will be published.
-        message (str): The message content to be sent to Kafka.
+        topic (str): The topic to publish to.
+        message (dict): The message to publish.
     """
-    producer.produce(topic, value=message)  # Send the message to the specified topic
-    producer.flush()  # Ensure all messages are delivered before moving on
+    producer.produce(topic, value=json.dumps(message))
+    producer.poll(0)  # Trigger any callbacks
 
-
-def log_error_to_kafka(producer, topic, user_id, error_type, msg_dict):
+def flush_producer(producer: Producer) -> None:
     """
-    Logs an error message to a specified Kafka topic.
+    Flush the producer to ensure all messages are sent.
+
+    Args:
+        producer (Producer): The Kafka producer instance to flush.
+    """
+    producer.flush()
+
+def log_error_to_kafka(producer: Producer, topic: str, user_id: str, error_type: str, msg_dict: dict) -> None:
+    """
+    Log an error message to a Kafka topic.
 
     Args:
         producer (Producer): The Kafka producer instance.
-        topic (str): The topic where error logs will be sent.
-        user_id (str): The ID of the user associated with the error.
+        topic (str): The topic to publish the error to.
+        user_id (str): The user ID associated with the error.
         error_type (str): The type of error that occurred.
-        msg_dict (dict): The original message content that caused the error.
+        msg_dict (dict): The original message that caused the error.
     """
-    # Create an error record with relevant information
     error_record = {
         "user_id": user_id,
         "error_type": error_type,
         "message_content": msg_dict,
-        "timestamp": datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),  # Capture the current timestamp : If there is a JSON Decoding error, we won't be able to get the timestamp, that is the reason we are adding a timestamp here!
+        "timestamp": int(time.time())
     }
-    # Publish the error record to Kafka
-    publish_message(producer, topic, json.dumps(error_record))
+    publish_message(producer, topic, error_record)
 
-
-def log_cleaned_data(producer, topic, user_id, msg_dict, cleantype):
+def log_cleaned_data(producer: Producer, topic: str, user_id: str, msg_dict: dict, clean_type: str) -> None:
     """
-    Logs cleaned data / the data that has been filtered out to a specified Kafka topic.
+    Log cleaned data to a Kafka topic.
 
     Args:
         producer (Producer): The Kafka producer instance.
-        topic (str): The topic where cleaned data will be sent.
-        user_id (str): The ID of the user associated with the message.
-        msg_dict (dict): The original message content that has been cleaned.
-        cleantype (str): The type of cleaning that was performed on the data.
+        topic (str): The topic to publish the cleaned data to.
+        user_id (str): The user ID associated with the cleaned data.
+        msg_dict (dict): The original message that was cleaned.
+        clean_type (str): The type of cleaning that was performed.
     """
-    # Create a record of the cleaned data with relevant information
-    record = {
+    cleaned_record = {
         "user_id": user_id,
         "message_content": msg_dict,
-        "cleantype": cleantype,
-        "timestamp": datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),  # Capture the current timestamp
+        "clean_type": clean_type,
+        "timestamp": int(time.time())
     }
-    # Publish the cleaned data record to Kafka
-    publish_message(producer, topic, json.dumps(record))
+    publish_message(producer, topic, cleaned_record)

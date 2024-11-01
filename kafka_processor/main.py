@@ -1,118 +1,156 @@
-from consumer import create_consumer, subscribe, poll_message
-from producer import create_producer, publish_message, log_error_to_kafka, log_cleaned_data
-from transformer import transform_message
-from summary_printer import SummaryPrinter
+"""
+Main module for the Kafka message processing pipeline.
+"""
+
 import json
+import time
+import uuid
+from confluent_kafka import KafkaException, KafkaError
+from consumer import create_consumer_with_retry, poll_message, close_consumer
+from producer import create_producer, publish_message, flush_producer, log_error_to_kafka, log_cleaned_data
+from summary_printer import SummaryPrinter
+from transformer import transform_message
+from metrics import MessageMetrics
 
 def main():
-    # Configuration settings for the Kafka consumer
+    """Main function to run the Kafka message processing pipeline."""
     consumer_config = {
-        'bootstrap.servers': 'localhost:29092',  # Kafka broker address.
-        'group.id': 'real-time-processor-group',  # Unique identifier for the consumer group.
-        'auto.offset.reset': 'earliest',  # Start consuming from the earliest message if no offset is found.
-        'enable.auto.commit': False,  # Disable automatic offset commits for manual control after processing. If True, then can lead to potential message loss if your application crashes before processing all messages since the offset is committed automatically
+        'bootstrap.servers': 'localhost:29092',
+        'group.id': f'real-time-processor-group-{uuid.uuid4()}',
+        'auto.offset.reset': 'latest',
+        'enable.auto.commit': False
     }
 
-    # Configuration settings for the Kafka producer
-    producer_config = {
-        'bootstrap.servers': 'localhost:29092',  # Kafka broker address.
-        'acks': 'all',  # It ensures that all in-sync replicas acknowledge the message before considering it successfully sent. This minimizes the risk of data loss but may increase latency slightly due to waiting for all replicas.
-        'retries': 5,  # Retry sending messages up to 5 times on transient errors to improve reliability.
-        'linger.ms': 5,  # Introduce a small delay to allow for batching, improving throughput.
-        'batch.size': 16384,  # Set a reasonable batch size (16 KB) to optimize throughput without excessive memory use.
-        'compression.type': 'snappy'  # Use Snappy compression for fast processing and reduced message size.
+    input_topic = 'user-login'
+
+    main_producer_config = {
+        'bootstrap.servers': 'localhost:29092',
+        'acks': 'all',
+        'compression.type': 'snappy',
+        'retries': 3,
+        'enable.idempotence': True
     }
 
-    # Create consumer and producer instances using the above configurations
-    consumer = create_consumer(consumer_config)
-    producer = create_producer(producer_config)
+    metrics_producer_config = {
+        'bootstrap.servers': 'localhost:29092',
+        'acks': 'all',
+        'compression.type': 'snappy',
+        'batch.size': 64768,
+        'linger.ms': 80
+    }
 
+    summary_cleaned_producer_config = {
+        'bootstrap.servers': 'localhost:29092',
+        'acks': '1',
+        'compression.type': 'snappy',
+        'max.in.flight.requests.per.connection': 1
+    }
 
-    # Subscribe the consumer to the 'user-login' topic
-    subscribe(consumer, 'user-login')
+    try:
+        consumer = create_consumer_with_retry(consumer_config, input_topic)
+    except KafkaException:
+        print("Failed to create Kafka consumer after multiple attempts. Exiting.")
+        return
 
-    # Initialize a summary printer to keep track of processing statistics
-    printer = SummaryPrinter()
+    main_producer = create_producer(main_producer_config)
+    metrics_producer = create_producer(metrics_producer_config)
+    summary_cleaned_producer = create_producer(summary_cleaned_producer_config)
 
+    summary_printer = SummaryPrinter()
+    message_metrics = MessageMetrics()
 
     print("Kafka Consumer has started...")
 
+    required_fields = ['user_id', 'ip', 'device_id', 'app_version', 'device_type', 'timestamp', 'locale']
+
+    summary_counter = 0
+    SUMMARY_PUBLISH_INTERVAL = 1000
+    MAX_MESSAGE_AGE = 60
+
     try:
-        # Start an infinite loop to continuously poll for new messages
         while True:
-            # Poll for a new message with a timeout
             msg = poll_message(consumer)
-            if msg is None or msg.error(): # Check for message availability and errors
+            if msg is None:
+                continue
+            if msg.error():
+                print(f"Consumer error: {msg.error()}")
                 continue
 
+            message_age = time.time() - msg.timestamp()[1] / 1000
+            if message_age > MAX_MESSAGE_AGE:
+                continue
+
+            ## Increment with a counter : message received
+            summary_printer.increment_received_count()
+
+
+            ### Check for Parsing Error
             try:
-                # Decode and load the message value as a JSON dictionary
                 msg_dict = json.loads(msg.value().decode('utf-8'))
-            except json.JSONDecodeError as e:
-                # Log JSON decoding errors to Kafka
-                log_error_to_kafka(producer, 'processed-errors', "Unknown", f"JSON decoding error: {str(e)}", {})
+                original_timestamp = float(msg_dict['timestamp'])
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                log_error_to_kafka(main_producer, 'processed-errors', "Unknown", f"Message parsing error: {str(e)}", {})
+                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', "Unknown")
                 continue
 
-            # Check for required fields, specifically 'user_id'
-            user_id = msg_dict.get('user_id')
-            if user_id is None:
-                log_error_to_kafka(producer, 'processed-errors', "Unknown", "Missing user_id", msg_dict)
+            ### Check if User_ID exists
+            if 'user_id' not in msg_dict or not msg_dict['user_id']:
+                log_error_to_kafka(main_producer, 'processed-errors', "Unknown", "Missing user_id", msg_dict)
+                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', "Unknown")
                 continue
 
-            # List of required fields to check for completeness
-            required_fields = ['ip', 'device_id', 'app_version', 'device_type', 'timestamp', 'locale']
-            all_fields_present = True
-            missing_fields = []
-            for field in required_fields:
-                if field not in msg_dict or msg_dict[field] is None:
-                    missing_fields.append(field)
-                    all_fields_present = False
+            ### Assigning user_id to message_id to avoid confusion
+            message_id = msg_dict['user_id']
 
-            # Log an error if any required fields are missing
-            if not all_fields_present:
-                log_error_to_kafka(producer, 'processed-errors', user_id, f"Missing fields: {missing_fields}", msg_dict)
+            ### Check for missing fields
+            missing_fields = [field for field in required_fields if field not in msg_dict or msg_dict[field] is None]
+            if missing_fields:
+                log_error_to_kafka(main_producer, 'processed-errors', message_id, f"Missing fields: {', '.join(missing_fields)}", msg_dict)
+                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', message_id)
                 continue
 
-            # Filter out messages where 'app_version' is not '2.3.0'
+            ### Filter the message
             if msg_dict.get('app_version') != '2.3.0':
-                printer.increment_filtered_count()
-                #log_cleaned_data(producer, 'cleaned-data', user_id, msg_dict, 'filterd messages app_version != 2.3.0')
+                summary_printer.increment_filtered_count()
+                log_cleaned_data(summary_cleaned_producer, 'cleaned-data', message_id, msg_dict, 'filtered_app_version')
+                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'cleaned-data', message_id)
                 continue
-            
-            # Transform the message (e.g., encode PII)
-            transformed_msg = transform_message(msg_dict, producer, 'processed-errors')
-            if transformed_msg is None:
+
+            ### Perform transformations
+            transformed_msg, error = transform_message(msg_dict)
+            if error:
+                log_error_to_kafka(main_producer, 'processed-errors', message_id, f"Transformation error: {error}", msg_dict)
+                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', message_id)
                 continue
-            
-            # Update the summary statistics
-            printer.update_counts(msg_dict['device_type'], msg_dict['locale'])
-            
+
+            ## Increment : the received message is processed and update the counts
+            summary_printer.increment_processed_count()
+            summary_printer.update_counts(msg_dict['device_type'], msg_dict['locale'])
+
+            ### PUBLISH the processed msg
             try:
-                # Publish the transformed message to the 'processed-output' topic
-                publish_message(producer, 'processed-output', json.dumps(transformed_msg))
-                consumer.commit(asynchronous=False)  # Commit after successful publishing
+                publish_message(main_producer, 'processed-output', transformed_msg)
+                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-output', message_id)
+
+                summary_counter += 1
+                if summary_counter >= SUMMARY_PUBLISH_INTERVAL:
+                    summary_stats = summary_printer.get_summary_statistics()
+                    publish_message(summary_cleaned_producer, 'summary-output', summary_stats)
+                    summary_counter = 0
+
+                consumer.commit()
             except Exception as e:
-                # Log any publishing errors to Kafka
-                log_error_to_kafka(producer, 'processed-errors', user_id, f"Publishing error: {str(e)}", transformed_msg)
-                continue  # Skip to the next message in case of failure
-
-            # Increment the processed message count
-            printer.processed_count += 1
-            #print(printer.processed_count)
-
-            # Publish summary statistics every 1000 processed messages
-            if printer.processed_count % 1000 == 0:
-                statistics = printer.get_summary_statistics()
-                publish_message(producer, 'summary-output', json.dumps(statistics))
-
+                log_error_to_kafka(main_producer, 'processed-errors', message_id, f"Publishing error: {str(e)}", transformed_msg)
+                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', message_id)
+                continue
 
     except KeyboardInterrupt:
-        print("Shutting down consumer...") # Graceful shutdown message
-    
+        print("Shutting down...")
     finally:
-        consumer.close()  # Ensure the consumer is closed
-        producer.flush()  # No close method; just flush to ensure delivery
+        close_consumer(consumer)
+        flush_producer(main_producer)
+        flush_producer(metrics_producer)
+        flush_producer(summary_cleaned_producer)
 
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
