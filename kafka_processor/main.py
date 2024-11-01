@@ -16,21 +16,23 @@ def main():
     """Main function to run the Kafka message processing pipeline."""
     consumer_config = {
         'bootstrap.servers': 'localhost:29092',
-        'group.id': f'real-time-processor-group-{uuid.uuid4()}',
-        'auto.offset.reset': 'latest',
-        'enable.auto.commit': False
+        'group.id': f'real-time-processor-group-{uuid.uuid4()}', ## Sets a unique consumer group ID for each run of the application. This approach ensures that the consumer always starts reading from the latest messages, as there won't be any previously committed offsets for this new group.
+        'auto.offset.reset': 'latest', 
+        'enable.auto.commit': False ## This gives more control over exactly when offsets are committed, which can be important for ensuring that messages are processed successfully before their offsets are committed.
     }
 
     input_topic = 'user-login'
 
+    ## Used by topics : processed-data & processed-errors (data integrity and reliability are crucial)
     main_producer_config = {
         'bootstrap.servers': 'localhost:29092',
-        'acks': 'all',
-        'compression.type': 'snappy',
+        'acks': 'all',  # replicas acknowledge the message 
+        'compression.type': 'snappy',  ### reduces network bandwidth
         'retries': 3,
-        'enable.idempotence': True
+        'enable.idempotence': True ## prevents duplicate messages in case of retries
     }
 
+    ## Used by topics : metrics-output
     metrics_producer_config = {
         'bootstrap.servers': 'localhost:29092',
         'acks': 'all',
@@ -39,6 +41,8 @@ def main():
         'linger.ms': 80
     }
 
+
+    ## Used by topics : cleaned-oubtput & summary-output
     summary_cleaned_producer_config = {
         'bootstrap.servers': 'localhost:29092',
         'acks': '1',
@@ -46,20 +50,38 @@ def main():
         'max.in.flight.requests.per.connection': 1
     }
 
+
+    """This block of code is responsible for creating a Kafka consumer and three different Kafka producers. 
+    It uses error handling to manage potential failures during the creation process."""
+
     try:
         consumer = create_consumer_with_retry(consumer_config, input_topic)
     except KafkaException:
         print("Failed to create Kafka consumer after multiple attempts. Exiting.")
-        return
 
-    main_producer = create_producer(main_producer_config)
-    metrics_producer = create_producer(metrics_producer_config)
-    summary_cleaned_producer = create_producer(summary_cleaned_producer_config)
+    try:
+        main_producer = create_producer(main_producer_config)
+    except Exception as e:
+        print(f'Error creating main producer: {e}')
+
+    try:
+        metrics_producer = create_producer(metrics_producer_config)
+    except Exception as e:
+        print(f'Error creating metrics producer: {e}')
+        
+    try:
+        summary_cleaned_producer = create_producer(summary_cleaned_producer_config)
+    except Exception as e:
+        print(f'Error creating summary cleaned producer: {e}')
+
+
 
     summary_printer = SummaryPrinter()
     message_metrics = MessageMetrics()
 
     print("Kafka Consumer has started...")
+
+
 
     required_fields = ['user_id', 'ip', 'device_id', 'app_version', 'device_type', 'timestamp', 'locale']
 
