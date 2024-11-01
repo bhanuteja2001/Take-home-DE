@@ -1,5 +1,9 @@
 # Kafka-Based Real-Time Data Processing Pipeline (Take-home)
 
+![Alt text](screenshots/Architecture.png)
+
+
+
 ```
 project-root/
 │
@@ -12,12 +16,13 @@ project-root/
 │   ├── consumer.py             # Consumer logic for Kafka
 │   ├── transformer.py          # Message transformation logic
 │   ├── summary_printer.py      # Summary statistics management
+│   ├── metrics.py              # Metrics collection and management
 │   └── Verify                  # Verification scripts for testing data flow
 │       ├── verify_processed_output.py   # Verifies 'processed-output' topic
 │       ├── verify_processed_errors.py   # Verifies 'processed-errors' topic
 │       ├── verify_summary_data.py       # Verifies 'summary-output' topic
-│       └── verify_cleaned_data.py       # Verifies 'cleaned-data' topic (note: may be empty)
-│
+│       ├── verify_cleaned_data.py       # Verifies 'cleaned-data' topic
+│       └── verify_metrics.py            # Verifies 'metrics-output' topic
 │
 └── README.md                   # Project documentation and setup instructions
 
@@ -25,7 +30,7 @@ project-root/
 
 ## Overview
 
-This project implements a real-time data processing pipeline using Apache Kafka, designed to efficiently consume, process, transform, and publish messages while ensuring robust error handling and summary statistics.
+This project implements a real-time data processing pipeline using Apache Kafka, designed to efficiently consume, process, transform, and publish messages while ensuring robust error handling, summary statistics, metrics handling and performance metrics.
 
 
 ### Architecture
@@ -38,35 +43,56 @@ The pipeline consists of several key components and utilizes four Kafka topics t
    - **`processed-errors`**: A dedicated topic for logging errors encountered during processing, such as JSON decoding issues or missing fields.
    - **`summary-output`**: A topic for publishing summary statistics, including counts of processed messages, device types, locales, and filtered records.
    - **`cleaned-data (Optional)`**: A topic for logging messages filtered out based on specific criteria (e.g., app_version)
+   - **`metrics-output`**: A topic for publishing performance metrics.
 
 2. **Components**:
    - **Consumer**: Subscribes to the `user-login` topic to read incoming messages.
    - **Producer**: Publishes transformed messages to `processed-output` and logs errors to `processed-errors`.
    - **Transformer**: Processes each message by hashing sensitive fields and formatting timestamps.
    - **Summary Printer**: Maintains processing statistics and publishes summaries to `summary-output`.
+   - **Metrics Collector**: Tracks and publishes performance metrics.
 
 
 ## Data Flow
 
+
 1. **Message Consumption**:
-   - The consumer reads messages from the `user-login` topic.
+   - The consumer reads messages from the `user-login` topic using the create_consumer_with_retry function.
+   - Messages are polled using the poll_message function.
+
+2. **Age Filtering**:
+   - Messages older than MAX_MESSAGE_AGE (60 seconds) are skipped.
+
+3. **Message Parsing and Validation**:
    - Messages are decoded from JSON format.
+   - Checks are performed for required fields (user_id, ip, device_id, app_version, device_type, timestamp, locale).
+   - Messages with missing user_id or other required fields are logged as errors.
 
-2. **Validation and Filtering**:
-   - Checks are performed for required fields (`user_id`, `ip`, `device_id`, etc.).
-   - Messages with an `app_version` not equal to `'2.3.0'` are filtered out.
+4. **App Version Filtering**:
+   - Messages with an `app_version` not equal to '2.3.0' are filtered out and logged to the 'cleaned-data' topic.
 
-3. **Transformation**:
-   - Sensitive fields are hashed for privacy.
-   - Timestamps are converted to a human-readable format.
+5. **Transformation**:
+   - Messages are transformed using the transform_message function, transformation include hashing (encoding) IP and DeviceID.
 
-4. **Publishing**:
-   - Transformed messages are sent to the `processed-output` topic.
+6. **Publishing**:
+   - Successfully transformed messages are published to the `processed-output` topic.
    - Errors encountered during processing are logged to the `processed-errors` topic.
 
-5. **Summary Statistics**:
-   - Tracks processed message counts, device types, locales, and filtered records.
-   - Publishes summary statistics every 1000 processed messages to the `summary-output` topic. Reduces overhead by batching updates, ensuring that reporting is both timely and resource-efficient without overwhelming the system with too frequent updates.
+7. **Metrics Recording**:
+   - Processing metrics are recorded for each message using the MessageMetrics class.
+   - Metrics are published to the `metrics-output` topic after each message is processed.
+
+8. **Summary Statistics**:
+   - Tracks processed message counts, device types, and locales.
+   - Publishes summary statistics every 1000 processed messages (SUMMARY_PUBLISH_INTERVAL) to the `summary-output` topic.
+
+9. **Error Handling**:
+   - Various error conditions (parsing errors, missing fields, transformation errors, publishing errors) are caught and logged to the `processed-errors` topic.
+
+10. **Offset Management**:
+    - The consumer manually commits offsets after successful message processing.
+
+This data flow reflects the additional error handling, metrics recording, and more granular filtering present in your current implementation.
 
 
 
@@ -190,10 +216,11 @@ The pipeline consists of several key components and utilizes four Kafka topics t
      - For each terminal, navigate to your project directory and activate the virtual environment as shown in step 3.
      - Run each consumer script for the respective topics:
        ```bash
-       python verify_processed_output.py    # Verifies messages in 'processed-output'
-       python verify_processed_errors.py    # Verifies messages in 'processed-errors'
-       python verify_summary_output.py      # Verifies messages in 'summary-output'
-       python verify_cleaned_data.py        # Verifies messages in 'cleaned-data'
+          python verify_processed_output.py
+          python verify_processed_errors.py
+          python verify_summary_output.py
+          python verify_cleaned_data.py
+          python verify_metrics_data.py
        ```
 
 By following these steps, you can set up and run your Kafka-based real-time data processing pipeline, ensuring that all components are functioning correctly.
@@ -206,11 +233,13 @@ By following these steps, you can set up and run your Kafka-based real-time data
 
 ## Outputs
 
-### 1. Kafka Producer Output
+### 1. Python Producer Output
 
 The Docker container for the Python producer generates messages as follows:
 
 ![Alt text](screenshots/docker-output.png)
+
+Looking at this we feel like this data is processed in real-time for analytics or can be used to login to any application.
 
 
 
@@ -240,12 +269,22 @@ Running `verify_processed_errors.py` shows:
 ![Alt text](screenshots/processed-errors.png)
 
 
-
 #### Summary Data
 
 Running `verify_summary_data.py` shows:
 
-![Alt text](screenshots/summary-data.png)
+![Alt text](screenshots/summary.png)
+
+#### Metrics Data
+
+Running `verify_metrics_data.py` shows:
+![Alt text](screenshots/metrics-sc.png)
+
+
+PS: Here modified verify-metrics to make it look neat but this is how it will look
+
+![Alt text](screenshots/metrics-dump.png)
+
 
 
 #### Cleaned Data
@@ -277,14 +316,14 @@ Running `verify_summary_data.py` shows:
 
 ### 3. How can this application scale with a growing dataset?
 
-- Increase the number of partitions for high-throughput Kafka topics
-- Add more consumer instances to process data from these partitions
+- Increase the number of partitions for each topic to allow for better parallelism and distribution of data.
+- Move from a single broker to a multi-broker cluster allowing for better distribution of partitions across multiple servers, increasing throughput and fault tolerance.
 - Upgrade hardware resources (CPU, RAM, disk) of Kafka brokers and application servers (Vertical Scaling)
-- Implement tiered storage for efficient data management
-- Adjust data retention policies based on business needs
-- Add a caching layer (e.g., Redis) for frequently accessed data
+- Instead of a single consumer, create a consumer group with multiple consumers allowing for parallel processing of messages from different partitions
+- For complex data processing, Kafka Streams can help scale your data processing pipeline.
+- Kafka Connect can help in efficiently moving data in and out of Kafka at scale.
 - Use stream processing frameworks like Kafka Streams or Apache Flink for efficient real-time processing
 - Implement intelligent load balancing for consumers
-- Use data partitioning strategies to distribute processing across nodes
+- Deploying Kafka on Kubernetes for easier scaling and management.
 - Set up auto-scaling based on monitoring metrics
 
