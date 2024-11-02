@@ -87,7 +87,6 @@ def main():
 
     summary_counter = 0
     SUMMARY_PUBLISH_INTERVAL = 1000
-    MAX_MESSAGE_AGE = 60
 
     try:
         while True:
@@ -98,9 +97,6 @@ def main():
                 print(f"Consumer error: {msg.error()}")
                 continue
 
-            message_age = time.time() - msg.timestamp()[1] / 1000
-            if message_age > MAX_MESSAGE_AGE:
-                continue
 
             ## Increment with a counter : message received
             summary_printer.increment_received_count()
