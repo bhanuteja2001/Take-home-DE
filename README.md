@@ -1,6 +1,6 @@
 # Kafka-Based Real-Time Data Processing Pipeline (Take-home)
 
-![Alt text](screenshots/Architecture.png)
+![Alt text](screenshots/archi-diagram.png)
 
 
 
