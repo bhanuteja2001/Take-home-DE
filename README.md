@@ -105,10 +105,32 @@ This data flow reflects the additional error handling, metrics recording, and mo
 - **Reusability**: Code can be reused across different parts of the application or in future projects.
 - **Scalability**: Modules can be scaled independently based on load and performance requirements.
 
-### 2. Why Hashing?
+### 2. Why Hashing device ID and masking ip address?
 
-- **Privacy Compliance**: IP Addresses and Device IDs are hashed using SHA-256 to anonymize these identifiers, ensuring compliance with privacy standards like GDPR and CCPA.
-- **Security**: Hashing is a one-way operation, making it difficult to reverse-engineer back to the original values, thereby protecting sensitive information.
+The decision to hash the device ID and mask the IP address is based on several privacy considerations and legal requirements:
+
+1. Compliance with data protection laws:
+   - GDPR considers IP addresses as personal data.
+   - CCPA includes IP addresses and device IDs as personal information.
+
+2. Balancing data utility and privacy:
+   - Hashing device ID provides anonymization while maintaining unique identifier.
+   - Masking IP address preserves some network-level information while protecting specific device identity.
+
+3. Risk mitigation:
+   - Reduces the risk of re-identification of individuals.
+   - Enhances data security in case of breaches.
+
+Advantages of this approach:
+
+1. Legal compliance: Meets requirements of various privacy laws like GDPR and CCPA.
+2. Data minimization: Adheres to the principle of collecting only necessary data.
+3. Flexibility: Allows for data analysis while protecting individual privacy.
+4. Trust building: Demonstrates commitment to user privacy, potentially improving reputation.
+5. Reduced liability: Minimizes risks associated with storing identifiable personal information.
+6. Maintained utility: Preserves some useful information for analytics and security purposes.
+
+This approach strikes a balance between data protection and usability, addressing key privacy concerns while still allowing for necessary data processing and analysis.
 
 ### 3. Why Summary Statistics?
 
@@ -128,7 +150,6 @@ This data flow reflects the additional error handling, metrics recording, and mo
 - **Data Quality Insights**: Logging filtered messages helps identify patterns or anomalies in the data that may require attention or adjustment in filtering criteria.
 - **Audit Trail**: Provides a record of all data that was excluded from processing, which can be useful for compliance and auditing purposes.
 - **Optimization**: Analyzing filtered data can lead to improvements in data collection processes or filtering logic, enhancing overall pipeline efficiency.
-
 
 ### 6. Why Manual Offset Management?
 
