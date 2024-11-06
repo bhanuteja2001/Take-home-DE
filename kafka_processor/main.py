@@ -49,10 +49,14 @@ def main():
     }
 
 
-    """This block of code is responsible for creating a Kafka consumer and three different Kafka producers. 
-    It uses error handling to manage potential failures during the creation process.
-    Implementing custom retry logic enables detailed logging and monitoring of retry attempts, 
-    which can be invaluable for debugging and performance tuning."""
+    """
+    1. This block of code is responsible for creating a Kafka consumer and three different Kafka producers. 
+    The custom retry mechanism is primarily focused on establishing the initial connection and subscription to the topic. 
+    2. Built-in retries in Kafka consumers are designed for handling errors during message consumption, not for the initial setup.
+    3. The main reason for the difference is that consumer setup is more complex, involving group coordination 
+    and partition assignment, which often benefits from custom retry logic. 
+    4.Producer setup is generally simpler and well-handled by Kafka's built-in mechanisms"""
+
 
     # In the consumer creation block
     try:
