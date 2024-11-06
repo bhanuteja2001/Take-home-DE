@@ -3,8 +3,6 @@ Main module for the Kafka message processing pipeline.
 """
 
 import json
-import time
-import uuid
 from confluent_kafka import KafkaException, KafkaError
 from consumer import create_consumer_with_retry, poll_message, close_consumer
 from producer import create_producer, publish_message, flush_producer, log_error_to_kafka, log_cleaned_data
@@ -16,7 +14,7 @@ def main():
     """Main function to run the Kafka message processing pipeline."""
     consumer_config = {
         'bootstrap.servers': 'localhost:29092',
-        'group.id': f'real-time-processor-group-{uuid.uuid4()}', ## Sets a unique consumer group ID for each run of the application. This approach ensures that the consumer always starts reading from the latest messages, as there won't be any previously committed offsets for this new group.
+        'group.id': 'consumer-group',
         'auto.offset.reset': 'earliest', 
         'enable.auto.commit': False ## This gives more control over exactly when offsets are committed, which can be important for ensuring that messages are processed successfully before their offsets are committed.
     }
