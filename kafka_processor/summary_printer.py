@@ -1,5 +1,7 @@
 """
 This module provides a class to track and summarize message processing statistics.
+(Persistent storage can be used to save the state)
+
 """
 
 from collections import defaultdict

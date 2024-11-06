@@ -50,27 +50,35 @@ def main():
 
 
     """This block of code is responsible for creating a Kafka consumer and three different Kafka producers. 
-    It uses error handling to manage potential failures during the creation process."""
+    It uses error handling to manage potential failures during the creation process.
+    Implementing custom retry logic enables detailed logging and monitoring of retry attempts, 
+    which can be invaluable for debugging and performance tuning."""
 
+    # In the consumer creation block
     try:
         consumer = create_consumer_with_retry(consumer_config, input_topic)
-    except KafkaException:
-        print("Failed to create Kafka consumer after multiple attempts. Exiting.")
+    except KafkaException as e:
+        log_error_to_kafka(main_producer, 'processed-errors', "Unknown", f"Failed to create Kafka consumer after multiple attempts: {str(e)}", {})
+        raise SystemExit("Exiting due to consumer creation failure.")
 
+    # In the producer creation blocks
     try:
         main_producer = create_producer(main_producer_config)
     except Exception as e:
-        print(f'Error creating main producer: {e}')
+        log_error_to_kafka(main_producer, 'processed-errors', "Unknown", f"Error creating main producer: {str(e)}", {})
+        raise SystemExit("Exiting due to main producer creation failure.")
 
     try:
         metrics_producer = create_producer(metrics_producer_config)
     except Exception as e:
-        print(f'Error creating metrics producer: {e}')
-        
+        log_error_to_kafka(main_producer, 'processed-errors', "Unknown", f"Error creating metrics producer: {str(e)}", {})
+        raise SystemExit("Exiting due to metrics producer creation failure.")
+
     try:
         summary_cleaned_producer = create_producer(summary_cleaned_producer_config)
     except Exception as e:
-        print(f'Error creating summary cleaned producer: {e}')
+        log_error_to_kafka(main_producer, 'processed-errors', "Unknown", f"Error creating summary cleaned producer: {str(e)}", {})
+        raise SystemExit("Exiting due to summary cleaned producer creation failure.")
 
 
 
@@ -92,7 +100,7 @@ def main():
             if msg is None:
                 continue
             if msg.error():
-                print(f"Consumer error: {msg.error()}")
+                log_error_to_kafka(main_producer, 'processed-errors', "Unknown", f"Consumer error: {msg.error()}", {})
                 continue
 
 
@@ -108,10 +116,18 @@ def main():
                 log_error_to_kafka(main_producer, 'processed-errors', "Unknown", f"Message parsing error: {str(e)}", {})
                 message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', "Unknown")
                 continue
+            
+            ### Perform transformations
+            transformed_msg, error = transform_message(msg_dict)
+            if error:
+                log_error_to_kafka(main_producer, 'processed-errors', message_id, f"Transformation error: {error}", msg_dict)
+                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', message_id)
+                continue
+
 
             ### Check if User_ID exists
             if 'user_id' not in msg_dict or not msg_dict['user_id']:
-                log_error_to_kafka(main_producer, 'processed-errors', "Unknown", "Missing user_id", msg_dict)
+                log_error_to_kafka(main_producer, 'processed-errors', "Unknown", "Missing user_id", transformed_msg)
                 message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', "Unknown")
                 continue
 
@@ -121,23 +137,18 @@ def main():
             ### Check for missing fields
             missing_fields = [field for field in required_fields if field not in msg_dict or msg_dict[field] is None]
             if missing_fields:
-                log_error_to_kafka(main_producer, 'processed-errors', message_id, f"Missing fields: {', '.join(missing_fields)}", msg_dict)
+                log_error_to_kafka(main_producer, 'processed-errors', message_id, f"Missing fields: {', '.join(missing_fields)}", transformed_msg)
                 message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', message_id)
                 continue
 
             ### Filter the message
             if msg_dict.get('app_version') != '2.3.0':
                 summary_printer.increment_filtered_count()
-                log_cleaned_data(summary_cleaned_producer, 'cleaned-data', message_id, msg_dict, 'filtered_app_version')
+                log_cleaned_data(summary_cleaned_producer, 'cleaned-data', message_id, transformed_msg, 'filtered_app_version')
                 message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'cleaned-data', message_id)
                 continue
 
-            ### Perform transformations
-            transformed_msg, error = transform_message(msg_dict)
-            if error:
-                log_error_to_kafka(main_producer, 'processed-errors', message_id, f"Transformation error: {error}", msg_dict)
-                message_metrics.record_and_publish_metrics(metrics_producer, original_timestamp, 'processed-errors', message_id)
-                continue
+            
 
             ## Increment : the received message is processed and update the counts
             summary_printer.increment_processed_count()
@@ -161,7 +172,8 @@ def main():
                 continue
 
     except KeyboardInterrupt:
-        print("Shutting down...")
+        log_error_to_kafka(main_producer, 'processed-errors', "Unknown", "Shutting down due to keyboard interrupt", {})
+        print("Shutting down!")
     finally:
         close_consumer(consumer)
         flush_producer(main_producer)

@@ -5,14 +5,16 @@ This module provides functions to interact with Kafka consumer.
 from typing import Dict, Any
 from confluent_kafka import Consumer, KafkaException, TopicPartition, OFFSET_END
 import time
+from producer import log_error_to_kafka
 
-def create_consumer_with_retry(config: Dict[str, Any], topic: str, max_retries: int = 5, retry_delay: int = 5) -> Consumer:
+def create_consumer_with_retry(config: Dict[str, Any], topic: str, error_logger, max_retries: int = 5, retry_delay: int = 5) -> Consumer:
     """
     Create a Kafka consumer with retry mechanism and seek to end.
 
     Args:
         config (Dict[str, Any]): Kafka consumer configuration.
         topic (str): Topic to subscribe to.
+        error_logger: Function to log errors (e.g., log_error_to_kafka).
         max_retries (int): Maximum number of retry attempts.
         retry_delay (int): Delay between retries in seconds.
 
@@ -33,15 +35,16 @@ def create_consumer_with_retry(config: Dict[str, Any], topic: str, max_retries: 
             for partition in consumer.assignment():
                 consumer.seek(TopicPartition(topic, partition.partition, OFFSET_END))
             
-            print(f"Successfully connected to Kafka broker on attempt {attempt + 1}")
+            log_error_to_kafka(None, 'processed-errors', "Unknown", f"Successfully connected to Kafka broker on attempt {attempt + 1}", {})
             return consumer
+        
         except KafkaException as e:
-            print(f"Attempt {attempt + 1} failed: {str(e)}")
+            log_error_to_kafka(None, 'processed-errors', "Unknown", f"Attempt {attempt + 1} failed: {str(e)}", {})
             if attempt < max_retries - 1:
-                print(f"Retrying in {retry_delay} seconds...")
+                log_error_to_kafka(None, 'processed-errors', "Unknown", f"Retrying in {retry_delay} seconds...", {})
                 time.sleep(retry_delay)
             else:
-                print("Max retries reached. Unable to connect to Kafka broker.")
+                log_error_to_kafka(None, 'processed-errors', "Unknown", "Max retries reached. Unable to connect to Kafka broker.", {})
                 raise
 
 def poll_message(consumer: Consumer, timeout: float = 1.0):
